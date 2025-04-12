@@ -35,6 +35,7 @@ def generate_sdk(openapi_spec_path: str, output_dir: str = "octostar_sdk", py_ve
             return
         
     # Flag for Python version-specific features
+    # For testing consistency, set a hard cutoff at 3.10
     use_modern_py = py_version >= 3.10
 
     # --- Helper Functions ---
@@ -353,17 +354,19 @@ def generate_sdk(openapi_spec_path: str, output_dir: str = "octostar_sdk", py_ve
             print(f"Warning: Error generating response model - {e}")
             return None
 
+    # --- Create output directory structure first ---
+    # This ensures the directory exists even if template loading fails
+    os.makedirs(output_dir, exist_ok=True)
+    
     # --- Template Loading ---
-    template_dir = os.path.join(os.path.dirname(__file__), "templates")  # templates alongside script
+    # Update the template directory path to be within the damascus package
+    template_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "templates")
     env = Environment(loader=FileSystemLoader(template_dir), trim_blocks=True, lstrip_blocks=True)
     try:
         client_template = env.get_template("client.py.j2")
-    except TemplateNotFound:
-        print("Error: Could not find templates. Make sure 'client.py.j2' is in a 'templates' folder next to the script.")
+    except Exception as e:
+        print(f"Error: Could not find templates. {e}")
         return
-
-    # --- Create output directory structure ---
-    os.makedirs(output_dir, exist_ok=True)
 
     # --- Model Generation ---
     if "components" in spec and "schemas" in spec["components"]:
@@ -397,7 +400,7 @@ def generate_sdk(openapi_spec_path: str, output_dir: str = "octostar_sdk", py_ve
     print(f"SDK generated and saved to {output_dir}")
 
 
-# --- Main Execution ---
+# --- Main Execution (When run directly) ---
 if __name__ == "__main__":
     import sys
     
@@ -409,5 +412,5 @@ if __name__ == "__main__":
     else:
         # Default behavior
         print("No OpenAPI file specified, using default: openapi.json")
-        print("Usage: python sdkgen.py [path_to_openapi_json or URL]")
-        generate_sdk("openapi.json")
+        print("Usage: python -m damascus.core.sdkgen [path_to_openapi_json or URL]")
+        generate_sdk("openapi.json") 
