@@ -39,6 +39,7 @@ setup(
             "mypy>=1.5.0",
             "flake8>=6.0.0",
             "uv==0.6.14",
+            "responses==0.25.7",
         ],
     },
     classifiers=[
