@@ -87,7 +87,8 @@ jobs:
     - name: Extract version from pyproject.toml using dasel
       id: version
       run: |
-        VERSION=$(./dasel -f pyproject.toml '.project.version')
+        # Get version and strip quotes using tr
+        VERSION=$(./dasel -f pyproject.toml '.project.version' | tr -d '"')
         echo "version=$VERSION" >> $GITHUB_OUTPUT
       working-directory: ${{ github.workspace }}
       shell: bash
