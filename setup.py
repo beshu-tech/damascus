@@ -28,6 +28,7 @@ setup(
         "requests>=2.25.0",
         "urllib3>=1.26.0",
         "jinja2>=3.1.0",
+        "pyyaml==6.0.2",
     ],
     extras_require={
         "dev": [
