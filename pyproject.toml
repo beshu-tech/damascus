@@ -7,7 +7,7 @@ name = "damascus"
 version = "0.1.0" 
 description = "Fast, modern, and open-source OpenAPI SDK Generator" 
 readme = "README.md" 
-requires-python = ">=3.8" n
+requires-python = ">=3.8"
 license = {text = "MIT"} 
 classifiers = [ 
     "Programming Language :: Python :: 3",
