@@ -57,6 +57,58 @@ jobs:
         file: ./coverage.xml
         fail_ci_if_error: false
   
+  tag-release:
+    # Run only on pushes to main, not on PRs, not on tags
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push' 
+    runs-on: ubuntu-latest
+    needs: test # Ensure tests pass before tagging
+    permissions:
+      contents: write # Need permission to push tags
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Install dasel
+      run: |
+        LATEST_DASEL=$(curl -s "https://api.github.com/repos/TomWright/dasel/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+        # Determine architecture
+        ARCH=""
+        if [ "${RUNNER_ARCH}" == "X64" ]; then
+          ARCH="amd64"
+        elif [ "${RUNNER_ARCH}" == "ARM64" ]; then
+          ARCH="arm64"
+        else
+          echo "Unsupported architecture: ${RUNNER_ARCH}"
+          exit 1
+        fi
+        # Download architecture-specific binary
+        curl -L -o dasel https://github.com/TomWright/dasel/releases/download/${LATEST_DASEL}/dasel_linux_${ARCH}
+        chmod +x dasel
+
+    - name: Extract version from pyproject.toml using dasel
+      id: version
+      run: |
+        VERSION=$(./dasel -f pyproject.toml '.project.version')
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+      working-directory: ${{ github.workspace }}
+      shell: bash
+
+    - name: Check if tag exists and create/push if not
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        TAG_NAME: v${{ steps.version.outputs.version }}
+      run: |
+        echo "Checking for tag $TAG_NAME"
+        # Check if tag exists remotely
+        if git ls-remote --tags origin refs/tags/$TAG_NAME | grep -q $TAG_NAME; then
+          echo "Tag $TAG_NAME already exists. Skipping tag creation."
+        else
+          echo "Tag $TAG_NAME does not exist. Creating and pushing tag."
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag $TAG_NAME
+          git push origin $TAG_NAME
+        fi
+        
   build:
     runs-on: ubuntu-latest
     needs: test
