@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="logo.png" alt="Damascus Logo" width="250" />
+  <img src="https://github.com/beshu-tech/damascus/raw/main/logo.png" alt="Damascus Logo" width="250" />
 </p>
 
 # Damascus - OpenAPI SDK Generator
