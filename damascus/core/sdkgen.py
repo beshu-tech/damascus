@@ -3,7 +3,7 @@ import re
 import os
 import urllib.request
 import urllib.error
-from typing import List, Dict, Any, Optional, Set, Union, cast
+from typing import List, Dict, Any, Optional, Set, cast
 from jinja2 import Environment, FileSystemLoader
 
 

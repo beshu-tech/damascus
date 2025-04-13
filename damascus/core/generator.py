@@ -75,7 +75,7 @@ def generate_sdk(
         response_schemas_set = identify_response_schemas(openapi_spec)
 
         # Generate response models - Pass the set
-        assert package_name is not None 
+        assert package_name is not None
         assert isinstance(package_name, str)
         response_models_info = generate_response_models(
             openapi_spec,

@@ -50,4 +50,4 @@ def parse_args() -> Dict[str, Any]:
     if args.spec_path and not args.output:
         parser.error("the -o/--output argument is required for SDK generation")
 
-    return vars(args) # Convert Namespace to dict
+    return vars(args)  # Convert Namespace to dict

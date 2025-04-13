@@ -224,7 +224,7 @@ def resolve_schema_references(schema: Dict[str, Any], components_schemas: Dict[s
                 # Cast the return value to Dict[str, Any]
                 return cast(Dict[str, Any], components_schemas[schema_name])
             else:
-                return {} # Indicate unresolved reference
+                return {}  # Indicate unresolved reference
 
     # Process nested properties
     resolved_schema = schema.copy()
