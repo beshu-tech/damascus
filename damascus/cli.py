@@ -10,8 +10,14 @@ import sys
 
 from damascus.core.generator import generate_sdk, load_openapi_spec
 
+# Import necessary types
+from typing import Dict, Any
 
-def main():
+
+def main() -> None:
+    """
+    Main entry point for the Damascus CLI.
+    """
     parser = argparse.ArgumentParser(description="Damascus SDK Generator")
 
     # Main command arguments

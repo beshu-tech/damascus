@@ -3,7 +3,7 @@ Main SDK generation orchestration.
 """
 
 import os
-from typing import Dict, List, Any, Set, Union
+from typing import Dict, List, Any, Set, Union, cast, Optional
 import traceback
 import yaml
 
@@ -21,10 +21,10 @@ from .template import render_template
 def generate_sdk(
     openapi_spec: Union[str, Dict[str, Any]],
     output_dir: str,
-    package_name: str = None,
+    package_name: Optional[str] = None,
     py_version: float = 3.10,
     use_modern_py: bool = False,
-    template_dir: str = None,
+    template_dir: Optional[str] = None,
 ) -> bool:
     """
     Generate an SDK from an OpenAPI specification.
@@ -75,6 +75,8 @@ def generate_sdk(
         response_schemas_set = identify_response_schemas(openapi_spec)
 
         # Generate response models - Pass the set
+        assert package_name is not None 
+        assert isinstance(package_name, str)
         response_models_info = generate_response_models(
             openapi_spec,
             schemas_dict,
@@ -91,7 +93,7 @@ def generate_sdk(
         )  # Pass the dict returned by generate_response_models
 
         # Render client template
-        client_code = render_template("client.py.j2", client_data, use_modern_py, template_dir)
+        client_code = render_template("client.py.j2", client_data, template_dir)
 
         # Create package directory if needed
         package_dir = os.path.join(output_dir, package_name)
@@ -118,7 +120,7 @@ def generate_sdk(
         return False
 
 
-def load_openapi_spec(openapi_spec_path: str, headers: Dict[str, str] = None) -> Dict[str, Any]:
+def load_openapi_spec(openapi_spec_path: str, headers: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
     """
     Load an OpenAPI specification from a file path or URL.
 
@@ -140,9 +142,9 @@ def load_openapi_spec(openapi_spec_path: str, headers: Dict[str, str] = None) ->
             response = requests.get(openapi_spec_path, headers=headers)
             response.raise_for_status()
             if openapi_spec_path.endswith(".yaml") or openapi_spec_path.endswith(".yml"):
-                return yaml.safe_load(response.text)
+                return cast(Dict[str, Any], yaml.safe_load(response.text))
             else:
-                return response.json()
+                return cast(Dict[str, Any], response.json())
         except Exception as e:
             raise ValueError(f"Error loading OpenAPI spec from URL: {e}")
     else:
@@ -150,11 +152,13 @@ def load_openapi_spec(openapi_spec_path: str, headers: Dict[str, str] = None) ->
         try:
             with open(openapi_spec_path, "r") as f:
                 if openapi_spec_path.endswith(".yaml") or openapi_spec_path.endswith(".yml"):
-                    return yaml.safe_load(f)
+                    # Cast the result of yaml.safe_load
+                    return cast(Dict[str, Any], yaml.safe_load(f))
                 else:
                     import json
 
-                    return json.load(f)
+                    # Cast the result of json.load
+                    return cast(Dict[str, Any], json.load(f))
         except Exception as e:
             raise ValueError(f"Error loading OpenAPI spec from file: {e}")
 
@@ -170,7 +174,7 @@ def get_schemas_from_spec(openapi_spec: Dict[str, Any]) -> Dict[str, Any]:
         A dictionary mapping schema names to their definitions
     """
     if "components" in openapi_spec and "schemas" in openapi_spec["components"]:
-        return openapi_spec["components"]["schemas"]
+        return cast(Dict[str, Any], openapi_spec["components"]["schemas"])
     return {}
 
 
@@ -181,7 +185,7 @@ def generate_response_models(
     output_dir: str,
     package_name: str,
     use_modern_py: bool = False,
-    response_schemas_set: Set[str] = None,  # Expect a Set
+    response_schemas_set: Optional[Set[str]] = None,  # Expect a Set
 ) -> Dict[str, Dict[str, Any]]:  # Keep returning Dict for now, might change later
     """
     Generate model classes for response schemas.
@@ -270,10 +274,21 @@ def generate_model_code(schema_name: str, schema: Dict[str, Any], schemas: Dict[
 
     # Import statements for types used in the model
     imports = ["from dataclasses import dataclass, field"]
-    if any("List" in field["type"] for field in fields):
-        imports.append("from typing import List, Optional, Dict, Any")
-    else:
-        imports.append("from typing import Optional, Dict, Any")
+    # Base imports needed for Optional fields and potentially complex types
+    typing_imports = {"Optional", "Dict", "Any"}
+
+    for field_info in fields:
+        # Cast the type to string, as get_type_from_schema should return a string representation
+        field_type = str(field_info["type"])
+        # Ensure field_type is a string before checking for 'List' substring
+        if "List" in field_type:
+            typing_imports.add("List")
+        # Consider adding checks for other complex types like Union if needed in the future
+
+    # Construct the import string from the set of required types
+    if typing_imports:
+        import_str = ", ".join(sorted(list(typing_imports)))
+        imports.append(f"from typing import {import_str}")
 
     class_name = schema_name
 
@@ -285,9 +300,10 @@ def generate_model_code(schema_name: str, schema: Dict[str, Any], schemas: Dict[
         code += "    pass\n"
     else:
         for field in fields:
-            field_name = field["name"]
-            field_type = field["type"]
-            field_required = field["required"]
+            # Explicitly cast dictionary lookups to expected types for mypy
+            field_name = str(field["name"])
+            field_type = str(field["type"])
+            field_required = bool(field["required"])
 
             if field_required:
                 code += f"    {field_name}: {field_type}\n"
@@ -329,7 +345,7 @@ def prepare_client_data(
     output_dir: str,
     package_name: str,
     use_modern_py: bool = False,
-    response_schemas: Dict[str, Dict[str, Any]] = None,
+    response_schemas: Optional[Dict[str, Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """
     Prepare data structure for the client template.
@@ -362,7 +378,7 @@ def prepare_client_data(
         security_schemes = openapi_spec["components"]["securitySchemes"]
 
     # Process paths
-    paths = {}
+    paths: Dict[str, Dict[str, Dict[str, Any]]] = {}
     for path, path_item in openapi_spec.get("paths", {}).items():
         for method, operation in path_item.items():
             if method not in ["get", "post", "put", "delete", "patch"]:
@@ -477,9 +493,11 @@ if __name__ == "__main__":
         # If a file path is provided as an argument
         openapi_file = sys.argv[1]
         print(f"Generating SDK from: {openapi_file}")
-        generate_sdk(load_openapi_spec(openapi_file))
+        # Add output_dir argument
+        generate_sdk(load_openapi_spec(openapi_file), output_dir="./generated_sdk")
     else:
         # Default behavior
         print("No OpenAPI file specified, using default: openapi.json")
         print("Usage: python -m damascus.core [path_to_openapi_json or URL]")
-        generate_sdk(load_openapi_spec("openapi.json"))
+        # Add output_dir argument
+        generate_sdk(load_openapi_spec("openapi.json"), output_dir="./generated_sdk")

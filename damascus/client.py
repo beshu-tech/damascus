@@ -4,7 +4,8 @@ Base client module for Damascus-generated SDKs.
 
 import os
 import requests
-from typing import Dict, List, Any
+from typing import Dict, List, Optional, Any, cast, Type, Self
+from types import TracebackType
 
 from damascus.exceptions import AuthenticationError, ConfigurationError, DamascusError
 
@@ -19,14 +20,14 @@ class Client:
 
     def __init__(
         self,
-        base_url: str = None,
-        api_key: str = None,
-        jwt_token: str = None,
+        base_url: Optional[str] = None,
+        api_key: Optional[str] = None,
+        jwt_token: Optional[str] = None,
         request_timeout: float = 10.0,
         verify_ssl: bool = True,
         retry_enabled: bool = True,
         max_retries: int = 3,
-        headers: Dict[str, str] = None,
+        headers: Optional[Dict[str, str]] = None,
     ):
         """
         Initialize a new API client.
@@ -97,7 +98,7 @@ class Client:
             Dict containing version information
         """
         response = self._request("GET", "/api/version")
-        return response
+        return cast(Dict[str, str], response)
 
     def get_resources(self) -> List[Dict[str, Any]]:
         """
@@ -107,24 +108,28 @@ class Client:
             List of resource information
         """
         response = self._request("GET", "/api/resources")
-        return response
+        return cast(List[Dict[str, Any]], response)
 
-    def _request(self, method: str, endpoint: str, **kwargs) -> Any:
+    def _request(self, method: str, endpoint: str, **kwargs: Any) -> Any:
         """
         Make a request to the API.
 
         Args:
             method: HTTP method (GET, POST, etc.)
             endpoint: API endpoint
-            **kwargs: Additional request parameters
+            **kwargs: Additional request parameters (type Any)
 
         Returns:
-            Parsed response data
+            Parsed response data (type Any)
 
         Raises:
             DamascusError: If the request fails
         """
-        url = f"{self.base_url.rstrip('/')}{endpoint}"
+        if self.base_url is None:
+            raise ConfigurationError("Base URL is not configured.")
+        # Assign to local variable for better type narrowing
+        base_url: str = self.base_url
+        url = f"{base_url.rstrip('/')}{endpoint}"
 
         # Set default request parameters
         if "timeout" not in kwargs:
@@ -158,10 +163,15 @@ class Client:
         """Close the client session."""
         self.session.close()
 
-    def __enter__(self):
+    def __enter__(self) -> Self:
         """Enter context manager."""
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(
+        self,
+        exc_type: Optional[Type[BaseException]],
+        exc_val: Optional[BaseException],
+        exc_tb: Optional[TracebackType]
+    ) -> None:
         """Exit context manager and close session."""
         self.close()

@@ -3,11 +3,11 @@ import re
 import os
 import urllib.request
 import urllib.error
-from typing import List, Dict, Any, Optional, Set
+from typing import List, Dict, Any, Optional, Set, Union, cast
 from jinja2 import Environment, FileSystemLoader
 
 
-def generate_sdk(openapi_spec_path: str, output_dir: str = "generated_sdk", py_version: float = 3.13):
+def generate_sdk(openapi_spec_path: str, output_dir: str = "generated_sdk", py_version: float = 3.13) -> None:
     """
     Generates a Python SDK from an OpenAPI specification using Jinja2 templates.
 
@@ -106,31 +106,35 @@ def generate_sdk(openapi_spec_path: str, output_dir: str = "generated_sdk", py_v
 
             if ref_schema:
                 # Treat referenced schemas as dict or use the model name if it's a response model
-                return ref_name if ref_name in response_models else "dict"
+                return cast(str, ref_name if ref_name in response_models else "dict")
             else:
-                return "Any"  # Unknown ref
+                # Return "str" for unresolved refs as a fallback
+                return cast(str, "str")
 
         if "anyOf" in schema:
-            return "Any"
+            # Return "str" for anyOf as a fallback
+            return cast(str, "str")
         if "oneOf" in schema:
-            return "Any"
+            # Return "str" for oneOf as a fallback
+            return cast(str, "str")
 
         schema_type = schema.get("type")
         if schema_type == "array":
             # Handle array items safely
             items = schema.get("items", {})
-            return f"List[{get_type_from_schema(items)}]"
+            return cast(str, f"List[{get_type_from_schema(items)}]")
         if schema_type == "integer":
-            return "int"
+            return cast(str, "int")
         if schema_type == "number":
-            return "float"
+            return cast(str, "float")
         if schema_type == "boolean":
-            return "bool"
+            return cast(str, "bool")
         if schema_type == "string":
-            return "str"
+            return cast(str, "str")
         if schema_type == "object":
-            return "dict"
-        return "Any"
+            return cast(str, "dict")
+        # Final fallback: return "str"
+        return cast(str, "str")
 
     def get_default_value(schema: dict) -> Any:
         """
@@ -247,7 +251,7 @@ def generate_sdk(openapi_spec_path: str, output_dir: str = "generated_sdk", py_v
                     deps.extend(get_dependencies(item))
             return deps
 
-        graph = {}
+        graph: Dict[str, List[str]] = {}
         for name, schema in schemas.items():
             graph[name] = []
             if "properties" in schema:
@@ -299,7 +303,7 @@ def generate_sdk(openapi_spec_path: str, output_dir: str = "generated_sdk", py_v
         recursion_stack = set()
         sorted_list = []
 
-        def visit(node):
+        def visit(node: str) -> None:
             if node in recursion_stack:
                 raise ValueError(f"Circular dependency detected involving {node}")
             if node not in visited:
@@ -476,38 +480,40 @@ def generate_sdk(openapi_spec_path: str, output_dir: str = "generated_sdk", py_v
         if "$ref" in schema:
             ref_name = schema["$ref"].split("/")[-1]
             # Reference to another model - use the class name directly
-            return ref_name
+            return cast(str, ref_name)
 
         schema_type = schema.get("type")
 
         if schema_type == "array":
             item_type = get_schema_field_type(schema.get("items", {}), schemas, use_modern_py)
-            return f"List[{item_type}]"
+            return cast(str, f"List[{item_type}]")
 
         if schema_type == "object":
-            return "Dict[str, Any]"  # Generic dict for embedded objects
+            return cast(str, "Dict[str, Any]")  # Keep specific type for object
 
         if schema_type == "string":
             format_type = schema.get("format")
             if format_type == "date-time":
-                return "datetime"  # Use datetime for date-time format
+                return cast(str, "datetime")  # Use datetime for date-time format
             if format_type == "date":
-                return "date"  # Use date for date format
-            return "str"
+                return cast(str, "date")  # Use date for date format
+            return cast(str, "str")
 
         if schema_type == "integer":
-            return "int"
+            return cast(str, "int")
 
         if schema_type == "number":
-            return "float"
+            return cast(str, "float")
 
         if schema_type == "boolean":
-            return "bool"
+            return cast(str, "bool")
 
         if "anyOf" in schema or "oneOf" in schema:
-            return "Any"  # Use Any for complex union types
+            # Return "str" for anyOf/oneOf as a fallback
+            return cast(str, "str")
 
-        return "Any"  # Default fallback
+        # Default fallback: return "str"
+        return cast(str, "str")
 
     def generate_response_models(
         response_schemas: Set[str],

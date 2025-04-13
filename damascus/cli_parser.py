@@ -38,10 +38,10 @@ def create_parser() -> argparse.ArgumentParser:
 
 def parse_args() -> Dict[str, Any]:
     """
-    Parse command-line arguments.
+    Parses command line arguments.
 
     Returns:
-        A namespace object containing the parsed arguments.
+        A dictionary containing the parsed arguments.
     """
     parser = create_parser()
     args = parser.parse_args()
@@ -50,4 +50,4 @@ def parse_args() -> Dict[str, Any]:
     if args.spec_path and not args.output:
         parser.error("the -o/--output argument is required for SDK generation")
 
-    return args
+    return vars(args) # Convert Namespace to dict

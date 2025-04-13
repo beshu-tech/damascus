@@ -34,11 +34,11 @@ def get_type_from_schema(schema: Dict[str, Any], schemas: Dict[str, Any]) -> str
     if not schema:
         return "Any"
 
-    schema_type = schema.get("type")
+    schema_type = schema.get("type", "")
 
     # Handle references
     if "$ref" in schema:
-        ref = schema["$ref"]
+        ref = str(schema["$ref"])
         ref_parts = ref.split("/")
         schema_name = ref_parts[-1]
         return schema_name

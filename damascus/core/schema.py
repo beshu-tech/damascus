@@ -3,7 +3,7 @@ Schema handling utilities for SDK generation.
 """
 
 import re
-from typing import Dict, List, Any, Optional, Tuple, Set
+from typing import Dict, List, Any, Optional, Tuple, Set, cast
 
 from damascus.core.types import to_snake_case, get_type_from_schema
 
@@ -105,7 +105,7 @@ def get_response_model(method_spec: Dict[str, Any], components_schemas: Dict[str
             snake_name = to_snake_case(prop_name)
 
             # Use a non-cached version of get_type_from_schema to avoid hashing issues
-            def get_prop_type(s):
+            def get_prop_type(s: Dict[str, Any]) -> str:
                 if not s:
                     return "Any"
                 if "$ref" in s:
@@ -209,28 +209,35 @@ def has_only_native_types(schema: Dict, schemas: Dict) -> bool:
     return True
 
 
-def resolve_schema_references(schema: Dict, components_schemas: Dict) -> Dict:
+def resolve_schema_references(schema: Dict[str, Any], components_schemas: Dict[str, Any]) -> Dict[str, Any]:
     """
     Resolve all references in a schema to their actual definition
     """
     if not schema or not isinstance(schema, dict):
-        return schema
+        return schema if isinstance(schema, dict) else {}
 
     if "$ref" in schema:
-        ref_path = schema["$ref"]
+        ref_path = str(schema["$ref"])
         if ref_path.startswith("#/components/schemas/"):
             schema_name = ref_path.split("/")[-1]
             if schema_name in components_schemas:
-                return components_schemas[schema_name]
+                # Cast the return value to Dict[str, Any]
+                return cast(Dict[str, Any], components_schemas[schema_name])
+            else:
+                return {} # Indicate unresolved reference
 
     # Process nested properties
+    resolved_schema = schema.copy()
     for key, value in schema.items():
         if isinstance(value, dict):
-            schema[key] = resolve_schema_references(value, components_schemas)
+            resolved_schema[key] = resolve_schema_references(value, components_schemas)
         elif isinstance(value, list):
-            schema[key] = [(resolve_schema_references(item, components_schemas) if isinstance(item, dict) else item) for item in value]
+            resolved_schema[key] = [
+                (resolve_schema_references(item, components_schemas) if isinstance(item, dict) else item)
+                for item in value
+            ]
 
-    return schema
+    return resolved_schema
 
 
 def get_request_body_parameters(request_body: Dict, schemas: Dict) -> List[Dict]:
@@ -373,7 +380,7 @@ def find_schema_dependencies(schema_names: Set[str], components_schemas: Dict) -
     """
     Find all dependencies of given schema names
     """
-    all_dependencies = set()
+    all_dependencies: Set[str] = set()
     to_process = list(schema_names)
 
     while to_process:
@@ -394,7 +401,7 @@ def get_schema_dependencies(schema: Dict, components_schemas: Dict) -> Set[str]:
     """
     Extract all schema references from a schema
     """
-    dependencies = set()
+    dependencies: Set[str] = set()
 
     if not schema or not isinstance(schema, dict):
         return dependencies
@@ -434,7 +441,7 @@ def build_dependency_graph(schemas: Dict) -> Dict[str, Set[str]]:
     """
     Build a graph of schema dependencies
     """
-    graph = {}
+    graph: Dict[str, Set[str]] = {}
 
     for schema_name, schema in schemas.items():
         graph[schema_name] = set()
@@ -458,7 +465,7 @@ def topological_sort(graph: Dict[str, Set[str]], schemas: Dict) -> List[str]:
     result = []
     status = {node: UNVISITED for node in graph}
 
-    def dfs(node):
+    def dfs(node: str) -> None:
         if status[node] == VISITING:
             # Circular dependency detected
             msg = f"Circular dependency detected involving {node}"
