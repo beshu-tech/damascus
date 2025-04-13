@@ -25,20 +25,20 @@ setup(
     url="https://github.com/beshu-tech/damascus",
     packages=find_packages(exclude=["tests", "examples"]),
     install_requires=[
-        "requests>=2.25.0",
-        "urllib3>=1.26.0",
-        "jinja2>=3.1.0",
+        "requests==2.32.3",
+        "urllib3==2.4.0",
+        "jinja2==3.1.6",
         "pyyaml==6.0.2",
     ],
     extras_require={
         "dev": [
-            "pytest>=7.0.0",
-            "pytest-cov>=4.1.0",
+            "pytest==8.3.5",
+            "pytest-cov==6.1.1",
             "black>=23.3.0",
             "isort>=5.12.0",
             "mypy>=1.5.0",
             "flake8>=6.0.0",
-            "uv>=0.1.0",
+            "uv==0.6.14",
         ],
     },
     classifiers=[
