@@ -21,7 +21,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Initial release
 - Basic client functionality
-- Version and ontologies endpoints
 - CLI for basic commands
 - Error handling
 - Documentation 

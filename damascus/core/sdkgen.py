@@ -3,10 +3,11 @@ import re
 import os
 import urllib.request
 import urllib.error
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Set
 from jinja2 import Environment, FileSystemLoader
 
-def generate_sdk(openapi_spec_path: str, output_dir: str = "octostar_sdk", py_version: float = 3.13):
+
+def generate_sdk(openapi_spec_path: str, output_dir: str = "generated_sdk", py_version: float = 3.13):
     """
     Generates a Python SDK from an OpenAPI specification using Jinja2 templates.
 
@@ -17,12 +18,12 @@ def generate_sdk(openapi_spec_path: str, output_dir: str = "octostar_sdk", py_ve
     """
 
     # Check if the input is a URL or a file path
-    is_url = openapi_spec_path.startswith(('http://', 'https://'))
-    
+    is_url = openapi_spec_path.startswith(("http://", "https://"))
+
     if is_url:
         try:
             with urllib.request.urlopen(openapi_spec_path) as response:
-                spec = json.loads(response.read().decode('utf-8'))
+                spec = json.loads(response.read().decode("utf-8"))
         except urllib.error.URLError as e:
             print(f"Error: Failed to fetch OpenAPI spec from URL: {e}")
             return
@@ -33,32 +34,53 @@ def generate_sdk(openapi_spec_path: str, output_dir: str = "octostar_sdk", py_ve
         except FileNotFoundError:
             print(f"Error: OpenAPI spec file not found: {openapi_spec_path}")
             return
-        
+
     # Flag for Python version-specific features
     # For testing consistency, set a hard cutoff at 3.10
     use_modern_py = py_version >= 3.10
 
+    # --- Create output directory structure first ---
+    # This ensures the directory exists even if template loading fails
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Determine if OpenAPI 3.0+ (components) or Swagger/OpenAPI 2.0 (definitions)
+    is_openapi3 = "components" in spec
+    schemas_dict = {}
+
+    if is_openapi3:
+        schemas_dict = spec.get("components", {}).get("schemas", {})
+    else:
+        # Handle Swagger 2.0 format
+        schemas_dict = spec.get("definitions", {})
+
     # --- Helper Functions ---
     def to_snake_case(name: str) -> str:
         """Converts a string to snake_case."""
-        name = re.sub('(.)([A-Z][a-z]+)', r'\1_\2', name)
-        return re.sub('([a-z0-9])([A-Z])', r'\1_\2', name).lower()
+        name = re.sub("(.)([A-Z][a-z]+)", r"\1_\2", name)
+        return re.sub("([a-z0-9])([A-Z])", r"\1_\2", name).lower()
 
     def get_response_type(responses: dict) -> str:
         """
         Determines the response type from the responses section, handling refs.
         """
         if "200" in responses:
-            content = responses["200"].get("content")
-            if content:
+            content = responses["200"].get("content") if is_openapi3 else None
+            schema = None
+
+            if is_openapi3 and content:
                 if "application/json" in content:
                     schema = content["application/json"].get("schema")
-                    if schema:
-                        return get_type_from_schema(schema)  # Use helper
                 elif "application/x-ndjson" in content:
                     return "requests.Response"  # Streaming
-                return "requests.Response"  # Other content types
-            return "None"  # No content in 200 response
+            else:
+                # OpenAPI 2.0 / Swagger format
+                schema = responses["200"].get("schema")
+
+            if schema:
+                return get_type_from_schema(schema)
+
+            return "None" if not schema else "dict"
+
         if "204" in responses:
             return "None"  # No Content
         return "dict"  # Default fallback
@@ -70,27 +92,44 @@ def generate_sdk(openapi_spec_path: str, output_dir: str = "octostar_sdk", py_ve
         # Instead of trying to hash the dict directly, we'll use a more direct approach
         if not schema:
             return "Any"
-            
+
         if "$ref" in schema:
-            # Resolve references to components/schemas
-            ref_name = schema["$ref"].split("/")[-1]
-            ref_schema = spec["components"]["schemas"].get(ref_name)
-            if ref_schema:
-                # Treat referenced schemas as dict
-                return "dict"
+            # Resolve references - handle both OpenAPI 3 and Swagger 2 formats
+            ref_path = schema["$ref"]
+            ref_name = ref_path.split("/")[-1]
+
+            ref_schema = None
+            if is_openapi3:
+                ref_schema = spec.get("components", {}).get("schemas", {}).get(ref_name)
             else:
-                return "Any" # Unknown ref
-        if "anyOf" in schema: return "Any"
+                ref_schema = spec.get("definitions", {}).get(ref_name)
+
+            if ref_schema:
+                # Treat referenced schemas as dict or use the model name if it's a response model
+                return ref_name if ref_name in response_models else "dict"
+            else:
+                return "Any"  # Unknown ref
+
+        if "anyOf" in schema:
+            return "Any"
+        if "oneOf" in schema:
+            return "Any"
+
         schema_type = schema.get("type")
-        if schema_type == "array": 
+        if schema_type == "array":
             # Handle array items safely
-            items = schema.get('items', {})
+            items = schema.get("items", {})
             return f"List[{get_type_from_schema(items)}]"
-        if schema_type == "integer": return "int"
-        if schema_type == "number": return "float"
-        if schema_type == "boolean": return "bool"
-        if schema_type == "string": return "str"
-        if schema_type == "object": return "dict"
+        if schema_type == "integer":
+            return "int"
+        if schema_type == "number":
+            return "float"
+        if schema_type == "boolean":
+            return "bool"
+        if schema_type == "string":
+            return "str"
+        if schema_type == "object":
+            return "dict"
         return "Any"
 
     def get_default_value(schema: dict) -> Any:
@@ -101,7 +140,7 @@ def generate_sdk(openapi_spec_path: str, output_dir: str = "octostar_sdk", py_ve
         # Handle empty schema
         if not schema:
             return None
-            
+
         if "default" not in schema:
             return None  # No default
 
@@ -117,24 +156,31 @@ def generate_sdk(openapi_spec_path: str, output_dir: str = "octostar_sdk", py_ve
         elif default_value is None:
             return "None"
         else:
-            return "None" # Fallback.  Shouldn't normally happen.
+            return "None"  # Fallback.  Shouldn't normally happen.
 
     def get_request_body_params(request_body: Optional[Dict]) -> List[Dict]:
         """Extracts and flattens request body parameters."""
         if not request_body:
             return []
 
-        content = request_body.get("content", {})
-        if "application/json" not in content:
-            return []
+        # Handle OpenAPI 3.0 format
+        if is_openapi3:
+            content = request_body.get("content", {})
+            if "application/json" not in content:
+                return []
 
-        schema = content["application/json"].get("schema")
-        if not schema:
-            return []
+            schema = content["application/json"].get("schema")
+            if not schema:
+                return []
 
-        if "$ref" in schema:
-            ref_name = schema["$ref"].split("/")[-1]
-            schema = spec["components"]["schemas"].get(ref_name)
+            if "$ref" in schema:
+                ref_name = schema["$ref"].split("/")[-1]
+                schema = schemas_dict.get(ref_name)
+                if not schema:
+                    return []
+        else:
+            # Handle Swagger/OpenAPI 2.0 format - request body is in parameters
+            schema = request_body
             if not schema:
                 return []
 
@@ -156,8 +202,23 @@ def generate_sdk(openapi_spec_path: str, output_dir: str = "octostar_sdk", py_ve
         # Handle other schema types if needed (e.g., array, string)
         return []  # Return empty list for unsupported types
 
+    def extract_request_body_from_parameters(parameters: List[Dict]) -> Optional[Dict]:
+        """
+        Extracts the body parameter from Swagger 2.0 style parameters.
+        Returns the body parameter schema or None if not found.
+        """
+        if not parameters:
+            return None
+
+        for param in parameters:
+            if param.get("in") == "body" and "schema" in param:
+                return param.get("schema")
+
+        return None
+
     def build_dependency_graph(schemas: Dict[str, Dict]) -> Dict[str, List[str]]:
         """Builds a dependency graph of model classes."""
+
         def get_dependencies(schema: Dict) -> List[str]:
             deps = []
             if "$ref" in schema:
@@ -206,6 +267,7 @@ def generate_sdk(openapi_spec_path: str, output_dir: str = "octostar_sdk", py_ve
 
     def has_only_native_types(schema: Dict) -> bool:
         """Check if a schema only uses native types (no refs)."""
+
         def check_schema(s: Dict) -> bool:
             if not s:
                 return True
@@ -228,7 +290,7 @@ def generate_sdk(openapi_spec_path: str, output_dir: str = "octostar_sdk", py_ve
 
         if not schema.get("properties"):
             return True
-            
+
         return all(check_schema(prop) for prop in schema["properties"].values())
 
     def topological_sort(graph: Dict[str, List[str]], schemas: Dict) -> List[str]:
@@ -261,103 +323,302 @@ def generate_sdk(openapi_spec_path: str, output_dir: str = "octostar_sdk", py_ve
 
         return sorted_list[::-1]  # Reverse to get correct dependency order
 
-    def get_response_model(method_spec: dict) -> Optional[str]:
-        """Generates dataclass code for response model if needed"""
-        # Type and structure validation
-        if not isinstance(method_spec, dict):
-            return None
-        if not method_spec.get('operationId'):
-            return None
-        
-        try:
-            responses = method_spec.get("responses", {})
-            if "200" not in responses:
-                return None
-            
-            content = responses["200"].get("content", {})
-            if "application/json" not in content:
-                return None
-            
-            schema = content["application/json"].get("schema")
-            if not schema:
-                return None
+    def identify_response_schemas(openapi_spec: Dict[str, Any]) -> Set[str]:
+        """
+        Identifies schemas used in responses throughout the API spec.
+        Returns a set of schema names used in any successful response.
+        """
+        response_schemas = set()
+        paths = openapi_spec.get("paths", {})
 
-            # Resolve $ref if present
+        for path_item in paths.values():
+            for method_spec in path_item.values():
+                if not isinstance(method_spec, dict):
+                    continue
+
+                responses = method_spec.get("responses", {})
+                success_responses = [r for r in responses.keys() if r.startswith("2")]
+
+                for status_code in success_responses:
+                    response = responses[status_code]
+
+                    # Handle OpenAPI 3.0 format
+                    if is_openapi3:
+                        content = response.get("content", {})
+
+                        for content_type, content_schema in content.items():
+                            if content_type == "application/json":
+                                schema = content_schema.get("schema", {})
+
+                                # Extract schema names from direct refs
+                                if "$ref" in schema:
+                                    ref_name = schema["$ref"].split("/")[-1]
+                                    response_schemas.add(ref_name)
+
+                                # For array responses, check items
+                                if schema.get("type") == "array" and "items" in schema:
+                                    if "$ref" in schema["items"]:
+                                        ref_name = schema["items"]["$ref"].split("/")[-1]
+                                        response_schemas.add(ref_name)
+                    # Handle Swagger 2.0 format
+                    else:
+                        schema = response.get("schema", {})
+                        if schema:
+                            # Extract schema names from direct refs
+                            if "$ref" in schema:
+                                ref_name = schema["$ref"].split("/")[-1]
+                                response_schemas.add(ref_name)
+
+                            # For array responses, check items
+                            if schema.get("type") == "array" and "items" in schema:
+                                if "$ref" in schema["items"]:
+                                    ref_name = schema["items"]["$ref"].split("/")[-1]
+                                    response_schemas.add(ref_name)
+
+        return response_schemas
+
+    def resolve_schema_dependencies(schema_names: Set[str], all_schemas: Dict[str, Dict]) -> Set[str]:
+        """
+        Recursively resolves all dependencies for a set of schema names.
+        Returns a set containing the original schemas plus all their dependencies.
+        """
+
+        def get_refs(schema: Dict) -> List[str]:
+            refs = []
             if "$ref" in schema:
-                ref_name = schema["$ref"].split("/")[-1]
-                schema = spec["components"]["schemas"].get(ref_name, {})
-            
-            if schema.get("type") != "object" or not schema.get("properties"):
-                return None
+                refs.append(schema["$ref"].split("/")[-1])
+            elif schema.get("type") == "array" and "items" in schema:
+                if "$ref" in schema["items"]:
+                    refs.append(schema["items"]["$ref"].split("/")[-1])
+            elif schema.get("type") == "object" and "properties" in schema:
+                for prop in schema["properties"].values():
+                    refs.extend(get_refs(prop))
+            elif "anyOf" in schema:
+                for item in schema["anyOf"]:
+                    refs.extend(get_refs(item))
+            elif "allOf" in schema:
+                for item in schema["allOf"]:
+                    refs.extend(get_refs(item))
+            elif "oneOf" in schema:
+                for item in schema["oneOf"]:
+                    refs.extend(get_refs(item))
+            return refs
 
-            # Generate fields with improved typing
-            required_fields = []
-            optional_fields = []
-            
-            required_props = schema.get("required", [])
-            
+        result = set(schema_names)
+        pending = list(schema_names)
+
+        while pending:
+            current = pending.pop()
+            if current in all_schemas:
+                schema = all_schemas[current]
+                # Get all direct refs from this schema
+                for ref in get_refs(schema):
+                    if ref not in result and ref in all_schemas:
+                        result.add(ref)
+                        pending.append(ref)
+
+        return result
+
+    def generate_model_code(schema_name: str, schema: Dict, schemas: Dict[str, Dict], use_modern_py: bool) -> str:
+        """
+        Generates Python code for a model class based on a schema.
+        """
+        # Generate class documentation
+        description = schema.get("description", f"Model for {schema_name}")
+        class_doc = f'    """{description}"""' if description else ""
+
+        # Generate fields with type annotations
+        fields = []
+        required_fields = []
+        optional_fields = []
+
+        required_props = schema.get("required", [])
+
+        if "properties" in schema:
             for prop_name, prop_schema in schema["properties"].items():
                 snake_name = to_snake_case(prop_name)
-                
-                # Use a non-cached version of get_type_from_schema to avoid hashing issues
-                def get_prop_type(s):
-                    if not s:
-                        return "Any"
-                    if "$ref" in s:
-                        ref = s["$ref"].split("/")[-1]
-                        return "dict"  # Simplified for response models
-                    if "anyOf" in s: return "Any"
-                    s_type = s.get("type")
-                    if s_type == "array": 
-                        items = s.get('items', {})
-                        return f"List[{get_prop_type(items)}]"
-                    if s_type == "integer": return "int"
-                    if s_type == "number": return "float"
-                    if s_type == "boolean": return "bool"
-                    if s_type == "string": return "str"
-                    if s_type == "object": return "dict"
-                    return "Any"
-                
-                field_type = get_prop_type(prop_schema)
-                
-                # Add descriptions as docstrings
-                description = prop_schema.get("description", "")
-                field_entry = []
-                if description:
-                    field_entry.append(f'    # {description}')
-                
-                # Add field with type annotation
-                is_required = prop_name in required_props
-                if is_required:
-                    field_entry.append(f"    {snake_name}: {field_type}")
-                    required_fields.extend(field_entry)
-                else:
-                    # Use | None syntax for optional fields (Python 3.10+)
-                    field_entry.append(f"    {snake_name}: {field_type} | None = None")
-                    optional_fields.extend(field_entry)
-            
-            # Combine fields with required fields first, then optional fields
-            fields = required_fields + optional_fields
-            
-            # Add frozen=True for immutability and slots=True for memory efficiency
-            op_id = method_spec['operationId']
-            base_name = op_id.split('_api_')[0] if '_api_' in op_id else op_id
-            sanitized_name = re.sub(r'\W+', '_', base_name)
-            class_name = f"{to_snake_case(sanitized_name).title().replace('_', '')}Response"
-            
-            return f"@dataclass(frozen=True, slots=True)\nclass {class_name}:\n" + "\n".join(fields)
-        
-        except KeyError as e:
-            print(f"Warning: Missing key in method spec - {e}")
-            return None
-        except Exception as e:
-            print(f"Warning: Error generating response model - {e}")
-            return None
+                field_type = get_schema_field_type(prop_schema, schemas, use_modern_py)
 
-    # --- Create output directory structure first ---
-    # This ensures the directory exists even if template loading fails
-    os.makedirs(output_dir, exist_ok=True)
-    
+                # Add property documentation if available
+                prop_doc = prop_schema.get("description", "")
+                if prop_doc:
+                    field_doc = f"    # {prop_doc}"
+                    if prop_name in required_props:
+                        required_fields.append(field_doc)
+                    else:
+                        optional_fields.append(field_doc)
+
+                # Add the field with type annotation
+                if prop_name in required_props:
+                    # Required field - no default value
+                    required_fields.append(f"    {snake_name}: {field_type}")
+                else:
+                    # Optional field - add default=None
+                    optional_type = f"{field_type} | None" if use_modern_py else f"Optional[{field_type}]"
+                    optional_fields.append(f"    {snake_name}: {optional_type} = None")
+
+        # Combine fields with required fields first, then optional
+        fields = required_fields + optional_fields
+
+        class_code = ["@dataclass(frozen=True)", f"class {schema_name}:", class_doc]
+
+        if fields:
+            class_code.extend(fields)
+        else:
+            class_code.append("    pass  # No properties defined")
+
+        return "\n".join(class_code)
+
+    def get_schema_field_type(schema: Dict, schemas: Dict[str, Dict], use_modern_py: bool) -> str:
+        """
+        Gets the Python type for a schema field, resolving references to other models.
+        """
+        if "$ref" in schema:
+            ref_name = schema["$ref"].split("/")[-1]
+            # Reference to another model - use the class name directly
+            return ref_name
+
+        schema_type = schema.get("type")
+
+        if schema_type == "array":
+            item_type = get_schema_field_type(schema.get("items", {}), schemas, use_modern_py)
+            return f"List[{item_type}]"
+
+        if schema_type == "object":
+            return "Dict[str, Any]"  # Generic dict for embedded objects
+
+        if schema_type == "string":
+            format_type = schema.get("format")
+            if format_type == "date-time":
+                return "datetime"  # Use datetime for date-time format
+            if format_type == "date":
+                return "date"  # Use date for date format
+            return "str"
+
+        if schema_type == "integer":
+            return "int"
+
+        if schema_type == "number":
+            return "float"
+
+        if schema_type == "boolean":
+            return "bool"
+
+        if "anyOf" in schema or "oneOf" in schema:
+            return "Any"  # Use Any for complex union types
+
+        return "Any"  # Default fallback
+
+    def generate_response_models(
+        response_schemas: Set[str],
+        all_schemas: Dict[str, Dict],
+        output_dir: str,
+        use_modern_py: bool,
+    ) -> Dict[str, str]:
+        """
+        Generates response model classes and saves them to the models directory.
+        Returns a dict mapping schema names to their model class names.
+        """
+        if not response_schemas:
+            return {}
+
+        # Create models directory
+        models_dir = os.path.join(output_dir, "models")
+        os.makedirs(models_dir, exist_ok=True)
+
+        # Get dependencies and build the graph
+        response_schema_dict = {name: all_schemas[name] for name in response_schemas if name in all_schemas}
+        if not response_schema_dict:
+            print("No valid response schemas found")
+            return {}
+
+        # Build dependency graph for topological sorting
+        graph = build_dependency_graph(response_schema_dict)
+
+        try:
+            # Sort schemas in dependency order
+            sorted_schemas = topological_sort(graph, response_schema_dict)
+        except ValueError as e:
+            print(f"Warning: {e}. Using original schema order.")
+            sorted_schemas = list(response_schema_dict.keys())
+
+        # Create imports for model.py
+        imports = [
+            "from dataclasses import dataclass",
+            "from typing import List, Dict, Any, Optional, Union",
+            "from datetime import datetime, date",
+        ]
+
+        model_classes = []
+        response_models = {}
+
+        # Generate model classes in sorted order
+        for schema_name in sorted_schemas:
+            schema = response_schema_dict[schema_name]
+            model_code = generate_model_code(schema_name, schema, all_schemas, use_modern_py)
+            model_classes.append(model_code)
+            response_models[schema_name] = schema_name
+
+        # Write models.py file
+        models_file = os.path.join(models_dir, "models.py")
+        with open(models_file, "w") as f:
+            f.write("\n".join(imports))
+            f.write("\n\n\n")  # Add spacing
+            f.write("\n\n".join(model_classes))
+
+        return response_models
+
+    def create_models_init(response_models: Dict[str, str], models_dir: str) -> None:
+        """
+        Creates the __init__.py file in the models directory to export all models.
+        """
+        if not response_models:
+            return
+
+        # Create exports
+        exports = [f"from .models import {model_name}" for model_name in response_models.values()]
+        exports.append(f"\n__all__ = {list(response_models.values())}")
+
+        # Write __init__.py file
+        init_file = os.path.join(models_dir, "__init__.py")
+        with open(init_file, "w") as f:
+            f.write("\n".join(exports))
+
+    # Define response_models at a higher scope so get_type_from_schema can use it
+    response_models = {}
+
+    def prepare_client_data(spec: Dict[str, Any], use_modern_py: bool, response_models: Dict[str, str]) -> Dict[str, Any]:
+        """
+        Prepares data for the client template, including models.
+        """
+
+        # Handle request body extraction based on API spec version
+        def get_request_body(method_spec: Dict[str, Any]) -> Optional[Dict]:
+            if is_openapi3:
+                return method_spec.get("requestBody")
+            else:
+                # Swagger 2.0 - parameters with "in: body"
+                return extract_request_body_from_parameters(method_spec.get("parameters", []))
+
+        client_data = {
+            "title": spec["info"]["title"].replace(" ", ""),
+            "description": spec["info"].get("description", ""),
+            "base_url": spec.get("servers", [{"url": spec.get("host", "http://localhost")}])[0]["url"],
+            "paths": spec["paths"],
+            "to_snake_case": to_snake_case,
+            "get_response_type": get_response_type,
+            "get_type_from_schema": get_type_from_schema,
+            "get_request_body_params": get_request_body_params,
+            "get_request_body": get_request_body,
+            "get_default_value": get_default_value,
+            "security_schemes": (spec.get("components", {}).get("securitySchemes", {}) if is_openapi3 else spec.get("securityDefinitions", {})),
+            "async_support": True,  # Enable async support by default
+            "use_modern_py": use_modern_py,  # Pass Python version flag
+            "response_models": response_models,  # Add response models
+            "is_openapi3": is_openapi3,  # Pass API version info
+        }
+        return client_data
+
     # --- Template Loading ---
     # Update the template directory path to be within the damascus package
     template_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "templates")
@@ -368,28 +629,27 @@ def generate_sdk(openapi_spec_path: str, output_dir: str = "octostar_sdk", py_ve
         print(f"Error: Could not find templates. {e}")
         return
 
-    # --- Model Generation ---
-    if "components" in spec and "schemas" in spec["components"]:
-        # Skip model generation entirely
-        pass
+    # --- Model Generation for Responses ---
+    if schemas_dict:
+        # Identify response schemas
+        response_schema_names = identify_response_schemas(spec)
+
+        if response_schema_names:
+            print(f"Found {len(response_schema_names)} response schemas")
+
+            # Resolve dependencies (add schemas that response schemas depend on)
+            response_schema_names = resolve_schema_dependencies(response_schema_names, schemas_dict)
+
+            # Generate model classes for response schemas
+            response_models = generate_response_models(response_schema_names, schemas_dict, output_dir, use_modern_py)
+
+            if response_models:
+                # Create models/__init__.py to export all models
+                create_models_init(response_models, os.path.join(output_dir, "models"))
 
     # --- Client Generation ---
     # Prepare data for the client template
-    client_data = {
-        "title": spec["info"]["title"].replace(" ", ""),
-        "description": spec["info"]["description"],
-        "base_url": spec.get("servers", [{"url": "http://localhost"}])[0]["url"],
-        "paths": spec["paths"],
-        "to_snake_case": to_snake_case,
-        "get_response_type": get_response_type,
-        "get_type_from_schema": get_type_from_schema,
-        "get_request_body_params": get_request_body_params,
-        "get_default_value": get_default_value, # Make available to template
-        "get_response_model": get_response_model,
-        "security_schemes": spec.get("components", {}).get("securitySchemes", {}),
-        "async_support": True,  # Enable async support by default
-        "use_modern_py": use_modern_py,  # Pass Python version flag
-    }
+    client_data = prepare_client_data(spec, use_modern_py, response_models)
 
     # Render the client template
     client_code = client_template.render(**client_data)
@@ -403,7 +663,7 @@ def generate_sdk(openapi_spec_path: str, output_dir: str = "octostar_sdk", py_ve
 # --- Main Execution (When run directly) ---
 if __name__ == "__main__":
     import sys
-    
+
     if len(sys.argv) > 1:
         # If a file path is provided as an argument
         openapi_file = sys.argv[1]
@@ -413,4 +673,4 @@ if __name__ == "__main__":
         # Default behavior
         print("No OpenAPI file specified, using default: openapi.json")
         print("Usage: python -m damascus.core.sdkgen [path_to_openapi_json or URL]")
-        generate_sdk("openapi.json") 
+        generate_sdk("openapi.json")

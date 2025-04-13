@@ -51,10 +51,14 @@ damascus generate -i https://example.com/api/openapi.json -o my_sdk
 ```python
 from my_sdk import Client
 
-# Initialize client with API key authentication
+# Initialize client with API key authentication and custom headers
 client = Client(
     base_url="https://api.example.com",
-    api_key="your-api-key"
+    api_key="your-api-key",
+    headers={
+        "X-API-Version": "1.0",
+        "X-Custom-Header": "custom-value"
+    }
 )
 
 # Make API calls using the generated client
@@ -113,10 +117,11 @@ client = Client(
     base_url=None,              # API base URL
     api_key=None,               # API key for authentication
     jwt_token=None,             # JWT token for authentication
-    timeout=10.0,               # Request timeout
-    verify_ssl=True,            # Verify SSL certificates
+    request_timeout=10.0,       # Request timeout in seconds
+    verify_ssl=True,            # Whether to verify SSL certificates
     retry_enabled=True,         # Enable request retries
-    max_retries=3               # Maximum retry attempts
+    max_retries=3,              # Maximum retry attempts
+    headers=None                # Additional HTTP headers for all requests
 )
 ```
 
@@ -157,13 +162,29 @@ See the [examples](../examples) directory for more usage examples.
 
 ### How do I handle connection timeouts?
 
-You can adjust the timeout setting when creating a client:
+You can adjust the request timeout setting when creating a client:
 
 ```python
 client = Client(
     base_url="https://api.example.com",
     api_key="your-api-key",
-    timeout=30.0  # 30 seconds timeout
+    request_timeout=30.0  # 30 seconds timeout
+)
+```
+
+### How do I add custom HTTP headers to all requests?
+
+You can provide custom headers when initializing the client:
+
+```python
+client = Client(
+    base_url="https://api.example.com",
+    api_key="your-api-key",
+    headers={
+        "X-API-Version": "2.0",
+        "X-Application-Name": "MyApp",
+        "X-Tracking-ID": "user-123"
+    }
 )
 ```
 

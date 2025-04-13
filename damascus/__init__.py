@@ -1,7 +1,7 @@
 """
 Damascus - Secure integration SDK for ReadonlyREST ecosystem.
 
-A powerful Python SDK for creating secure and efficient integrations 
+A powerful Python SDK for creating secure and efficient integrations
 with the ReadonlyREST ecosystem.
 
 Runtime compatibility: Python 3.8+
@@ -16,9 +16,4 @@ __license__ = "GPLv3"
 from damascus.client import Client
 from damascus.exceptions import DamascusError, AuthenticationError, ConfigurationError
 
-__all__ = [
-    "Client",
-    "DamascusError",
-    "AuthenticationError", 
-    "ConfigurationError"
-] 
+__all__ = ["Client", "DamascusError", "AuthenticationError", "ConfigurationError"]

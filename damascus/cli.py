@@ -4,94 +4,75 @@ Command-line interface for Damascus.
 Provides functionality to generate SDK code from OpenAPI specifications.
 """
 
+import argparse
 import os
 import sys
-import urllib.request
-import tempfile
-from typing import Optional, List
 
-from damascus.cli_parser import parse_args
-from damascus.core import generate_sdk
+from damascus.core.generator import generate_sdk, load_openapi_spec
 
 
-def handle_generate_sdk(spec_path: str, output_dir: str, headers: Optional[List[str]] = None, py_version: float = 3.13) -> bool:
-    """
-    Handle SDK generation from OpenAPI specification.
-    
-    Args:
-        spec_path: Path to OpenAPI spec file or URL
-        output_dir: Output directory for the generated SDK
-        headers: Optional HTTP headers for remote spec retrieval
-        py_version: Target Python version
-        
-    Returns:
-        True if successful, False otherwise
-    """
-    try:
-        # Process headers if provided
-        header_dict = {}
-        if headers:
-            for header in headers:
-                if ":" not in header:
-                    print(f"Warning: Ignoring invalid header format: {header}")
-                    continue
-                name, value = header.split(":", 1)
-                header_dict[name.strip()] = value.strip()
-                
-        # Handle URL vs local file
-        is_url = spec_path.startswith(('http://', 'https://'))
-        
-        if is_url and headers:
-            # For URLs with headers, we need to fetch the spec first
-            request = urllib.request.Request(spec_path)
-            for name, value in header_dict.items():
-                request.add_header(name, value)
-                
-            with urllib.request.urlopen(request) as response:
-                spec_json = response.read().decode('utf-8')
-                
-            # Save to a temporary file
-            with tempfile.NamedTemporaryFile(suffix='.json', delete=False) as temp_file:
-                temp_path = temp_file.name
-                temp_file.write(spec_json.encode('utf-8'))
-                
+def main():
+    parser = argparse.ArgumentParser(description="Damascus SDK Generator")
+
+    # Main command arguments
+    parser.add_argument("spec", help="Path to an OpenAPI specification file or URL")
+    parser.add_argument("-o", "--output", required=True, help="Output directory for the generated SDK")
+    parser.add_argument(
+        "-p",
+        "--package",
+        help="Package name for the generated SDK (defaults to API title from spec)",
+    )
+    parser.add_argument(
+        "--modern-python",
+        action="store_true",
+        help="Generate code using modern Python features (3.7+)",
+    )
+    parser.add_argument(
+        "-H",
+        "--header",
+        action="append",
+        help="HTTP headers for remote spec retrieval (format: 'Key: Value')",
+    )
+
+    args = parser.parse_args()
+
+    # Process headers if provided
+    headers = None
+    if args.header:
+        headers = {}
+        for header in args.header:
             try:
-                # Generate SDK from the temporary file
-                success = generate_sdk(temp_path, output_dir, py_version)
-            finally:
-                # Clean up temporary file
-                os.unlink(temp_path)
-                
-            return success
+                key, value = [x.strip() for x in header.split(":", 1)]
+                headers[key] = value
+            except ValueError:
+                print(f"Error: Invalid header format '{header}'. Use 'Key: Value' format.")
+                sys.exit(1)
+
+    # Load OpenAPI spec
+    try:
+        openapi_spec = load_openapi_spec(args.spec, headers)
+    except ValueError as e:
+        print(f"Error: {e}")
+        sys.exit(1)
+
+    # Generate SDK
+    try:
+        success = generate_sdk(
+            openapi_spec=openapi_spec,
+            output_dir=args.output,
+            package_name=args.package,
+            use_modern_py=args.modern_python,
+        )
+
+        if success:
+            print(f"SDK generated successfully at {os.path.abspath(args.output)}")
         else:
-            # Generate directly from the path or URL
-            return generate_sdk(spec_path, output_dir, py_version)
-        
+            print("SDK generation failed")
+            sys.exit(1)
     except Exception as e:
         print(f"Error generating SDK: {e}")
-        return False
-
-
-def main() -> int:
-    """Main CLI entry point."""
-    args = parse_args()
-    
-    # Check if spec_path is provided
-    if not args.spec_path:
-        print("Error: OpenAPI specification path is required")
-        print("Usage: damascus [spec_path] -o [output_dir]")
-        return 1
-    
-    # Handle SDK generation
-    success = handle_generate_sdk(
-        args.spec_path, 
-        args.output, 
-        args.header, 
-        args.py_version
-    )
-    
-    return 0 if success else 1
+        sys.exit(1)
 
 
 if __name__ == "__main__":
-    sys.exit(main()) 
+    main()
