@@ -2,6 +2,55 @@
 requires = ["setuptools>=64", "wheel", "uv"]
 build-backend = "setuptools.build_meta"
 
+[project]
+name = "damascus"  
+version = "0.1.0" 
+description = "Fast, modern, and open-source OpenAPI SDK Generator" 
+readme = "README.md" 
+requires-python = ">=3.8" n
+license = {text = "MIT"} 
+classifiers = [ 
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "requests",
+    "pyyaml",
+    "jinja2",
+    "certifi",
+    "charset-normalizer",
+    "click",
+    "idna",
+    "markupsafe",
+    "packaging",
+    "typing-extensions",
+    "urllib3",
+]
+
+[project.optional-dependencies]
+dev = [
+    "black==25.1.0",
+    "coverage==7.8.0",
+    "flake8==7.2.0",
+    "iniconfig==2.1.0",
+    "isort==6.0.1",
+    "mccabe==0.7.0",
+    "mypy==1.15.0",
+    "mypy-extensions==1.0.0",
+    "pathspec==0.12.1",
+    "platformdirs==4.3.7",
+    "pluggy==1.5.0",
+    "pycodestyle==2.13.0",
+    "pyflakes==3.3.2",
+    "pytest==8.3.5",
+    "pytest-cov==6.1.1",
+    "responses==0.25.7",
+    "uv==0.6.14",
+    "types-requests",
+    "types-pyyaml",
+]
+
 [tool.black]
 line-length = 160
 include = '\.pyi?$'
