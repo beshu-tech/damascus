@@ -6,6 +6,7 @@ import os
 from typing import Dict, List, Any, Set, Union, cast, Optional
 import traceback
 import yaml
+import pprint
 
 from .schema import (
     get_response_type,
@@ -455,6 +456,11 @@ def prepare_client_data(
                 "summary": operation.get("summary", ""),
                 "description": operation.get("description", ""),
             }
+
+    # --- DEBUGGING: Print the processed paths --- 
+    print("--- Processed Paths for Template ---")
+    pprint.pprint(paths)
+    print("------------------------------------"),
 
     return {
         "title": title,

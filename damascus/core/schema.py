@@ -281,10 +281,18 @@ def get_request_body_parameters(request_body: Dict, schemas: Dict) -> List[Dict]
 
     params = []
     for prop_name, prop_schema in properties.items():
+        # Resolve references within the property schema itself before getting type
+        resolved_prop_schema = resolve_schema_references(prop_schema, schemas)
+        # Calculate the type string
+        param_type = get_type_from_schema(resolved_prop_schema, schemas)
+
         params.append(
             {
-                "name": prop_name,
-                "schema": prop_schema,
+                "name": prop_name, # Keep original name for JSON key lookup if needed later?
+                "original_name": prop_name, # Store original name separately
+                "snake_name": to_snake_case(prop_name), # Snake case for Python variable
+                "schema": resolved_prop_schema, # Store the resolved schema
+                "type": param_type, # Add the calculated type string
                 "required": prop_name in required,
             }
         )
