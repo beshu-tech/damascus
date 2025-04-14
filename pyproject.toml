@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "damascus"  
-version = "0.1.3" 
+version = "0.1.4" 
 description = "Fast, modern, and open-source OpenAPI SDK Generator" 
 readme = "README.md" 
 requires-python = ">=3.8"
@@ -27,6 +27,9 @@ dependencies = [
     "typing-extensions",
     "urllib3",
 ]
+
+[project.scripts]
+damascus = "damascus.cli:main"
 
 [project.optional-dependencies]
 dev = [
